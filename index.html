@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="manifest" href="manifest.json">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>JARVIS Mk-VI Tactical Vision Engine</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
+
+<style>
+*{
+    box-sizing:border-box;
+    margin:0;
+    padding:0;
+}
+
+:root {
+    --hud-color: #00eaff;
+    --hud-glow: rgba(0,238,255,0.4);
+    --hud-bg: rgba(0,10,18,0.65);
+    --alert-color: #ff315d;
+}
+
+/* SPECTRUM MODES */
+body.mode-thermal {
+    --hud-color: #ffcc00;
+    --hud-glow: rgba(255,204,0,0.5);
+    --hud-bg: rgba(25,0,0,0.75);
+}
+
+body.mode-night {
+    --hud-color: #00ff66;
+    --hud-glow: rgba(0,255,102,0.5);
+    --hud-bg: rgba(0,20,0,0.75);
+}
+
+html,body{
+    width:100%;
+    height:100%;
+    overflow:hidden;
+    background:#010204;
+    color:var(--hud-color);
+    font-family:"Courier New",monospace;
+    transition: color 0.3s;
+}
+
+body{
+    display:flex;
+    justify-content:center;
+    align-items:center;
+}
+
+.hud{
+    position:relative;
+    width:1280px;
+    height:720px;
+    max-width:100vw;
+    max-height:100vh;
+    overflow:hidden;
+    background:#000;
+    border:1px solid var(--hud-glow);
+    box-shadow: 0 0 20px var(--hud-glow), inset 0 0 60px rgba(0,0,0,0.8);
+}
+
+/* VIDEO SPECTRUM FILTERS */
+video{
+    position:absolute;
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    transform:scaleX(-1);
+    transition: filter 0.3s ease;
+    filter: contrast(1.1) brightness(0.8) saturate(0.8);
+}
+
+body.mode-thermal video {
+    filter: contrast(220%) hue-rotate(180deg) invert(100%) saturate(350%);
+}
+
+body.mode-night video {
+    filter: sepia(100%) hue-rotate(80deg) saturate(800%) contrast(160%) brightness(1.2);
+}
+
+canvas{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    z-index:2;
+}
+
+.overlay{
+    position:absolute;
+    inset:0;
+    z-index:5;
+    pointer-events:none;
+}
+
+.scanlines{
+    position:absolute;
+    inset:0;
+    background: repeating-linear-gradient(
+        to bottom,
+        rgba(255,255,255,0.03) 0px,
+        rgba(255,255,255,0.03) 1px,
+        transparent 2px,
+        transparent 4px
+    );
+}
+
+/* HEADERS & PANELS */
+.header{
+    position:absolute;
+    top:18px;
+    left:25px;
+    right:25px;
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    font-size:12px;
+}
+
+.title{
+    font-size:20px;
+    font-weight:bold;
+    letter-spacing:2px;
+    text-shadow:0 0 10px var(--hud-color);
+}
+
+.subtitle{ opacity:0.6; font-size:10px; margin-top:2px; }
+
+.panel{
+    position:absolute;
+    padding:12px;
+    border-left:2px solid var(--hud-color);
+    background:var(--hud-bg);
+    backdrop-filter:blur(6px);
+    font-size:10px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+}
+
+.panel-left{ left:25px; bottom:60px; width:240px; }
+.panel-right{ right:25px; top:80px; width:220px; }
+
+.panelTitle{
+    font-size:11px;
+    font-weight:bold;
+    margin-bottom:8px;
+    border-bottom:1px solid var(--hud-glow);
+    padding-bottom:4px;
+}
+
+.data-row{
+    display:flex;
+    justify-content:space-between;
+    margin:5px 0;
+}
+
+.val{ color:#fff; font-weight:bold; }
+
+/* SPATIAL GAUGES */
+.gauge-box {
+    margin-top: 8px;
+}
+
+.gauge{
+    height:6px;
+    background:rgba(255,255,255,0.1);
+    position:relative;
+    overflow:hidden;
+    margin-top:2px;
+}
+
+.gauge-bar{
+    height:100%;
+    width:50%;
+    background:var(--hud-color);
+    box-shadow:0 0 8px var(--hud-color);
+    transition: width 0.1s ease;
+}
+
+/* SPECTRUM CONTROLS */
+.controls{
+    position:absolute;
+    bottom:20px;
+    left:50%;
+    transform:translateX(-50%);
+    z-index:10;
+    pointer-events:auto;
+    display:flex;
+    gap:8px;
+}
+
+button{
+    background:var(--hud-bg);
+    border:1px solid var(--hud-color);
+    color:var(--hud-color);
+    padding:8px 14px;
+    font-family:inherit;
+    font-size:10px;
+    font-weight:bold;
+    cursor:pointer;
+    transition:all 0.2s;
+    letter-spacing:1px;
+}
+
+button:hover, button.active{
+    background:var(--hud-color);
+    color:#000;
+    box-shadow:0 0 12px var(--hud-color);
+}
+
+/* RADAR */
+.radar{
+    position:absolute;
+    right:25px;
+    bottom:60px;
+    width:130px;
+    height:130px;
+    border:1px solid var(--hud-color);
+    border-radius:50%;
+    background: radial-gradient(circle, transparent 60%, var(--hud-glow) 100%);
+    overflow:hidden;
+}
+
+.radar-sweep{
+    position:absolute;
+    width:50%;
+    height:50%;
+    left:50%;
+    top:50%;
+    transform-origin:0 0;
+    background:linear-gradient(45deg, transparent 50%, var(--hud-glow));
+    animation:radarSpin 2s linear infinite;
+}
+
+@keyframes radarSpin{ from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+
+/* RETICLE */
+.reticle{
+    position:absolute;
+    left:50%;
+    top:50%;
+    width:100px;
+    height:100px;
+    transform:translate(-50%,-50%);
+    border:1px dashed var(--hud-glow);
+    border-radius:50%;
+    pointer-events:none;
+}
+
+.reticle::after {
+    content:'';
+    position:absolute;
+    inset:40%;
+    border:1px solid var(--hud-color);
+}
+
+/* BOOT */
+.boot{
+    position:absolute;
+    inset:0;
+    z-index:30;
+    background:#010408;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    align-items:center;
+    transition:opacity 0.6s;
+}
+
+.progress-bar{
+    width:280px;
+    height:3px;
+    background:#081820;
+    margin-top:15px;
+}
+
+.progress-fill{
+    width:0%;
+    height:100%;
+    background:var(--hud-color);
+    box-shadow:0 0 10px var(--hud-color);
+}
+</style>
+</head>
+
+<body>
+
+<div class="hud">
+    <video id="webcam" autoplay muted playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <div class="overlay">
+        <div class="scanlines"></div>
+
+        <div class="header">
+            <div>
+                <div class="title">J.A.R.V.I.S // Mk-VI</div>
+                <div class="subtitle">TACTICAL NEURAL ENGINE // SPECTRUM ANALYZER</div>
+            </div>
+            <div style="text-align:center">
+                <div id="status" style="color:var(--alert-color); font-weight:bold;">INITIALIZING</div>
+                <div id="speechStatus" class="subtitle">VOICE COMMANDS: LISTENING</div>
+            </div>
+            <div style="text-align:right">
+                <div>SYS.VER // 6.4.0</div>
+                <div id="clock" class="subtitle">00:00:00</div>
+            </div>
+        </div>
+
+        <!-- LEFT TELEMETRY PANEL -->
+        <div class="panel panel-left">
+            <div class="panelTitle">◈ BIOMETRICS & SPATIAL</div>
+            
+            <div class="data-row"><span>TARGET LOCKS</span><span id="targetCount" class="val">0</span></div>
+            <div class="data-row"><span>EST. DISTANCE</span><span id="distanceVal" class="val">-- cm</span></div>
+            <div class="data-row"><span>PULSE (EST)</span><span id="pulseVal" class="val">-- BPM</span></div>
+            
+            <div class="gauge-box">
+                <div class="data-row"><span>HEAD PITCH</span><span id="pitchVal" class="val">0°</span></div>
+                <div class="gauge"><div id="pitchBar" class="gauge-bar"></div></div>
+            </div>
+
+            <div class="gauge-box">
+                <div class="data-row"><span>HEAD YAW</span><span id="yawVal" class="val">0°</span></div>
+                <div class="gauge"><div id="yawBar" class="gauge-bar"></div></div>
+            </div>
+
+            <div class="gauge-box">
+                <div class="data-row"><span>HEAD ROLL</span><span id="rollVal" class="val">0°</span></div>
+                <div class="gauge"><div id="rollBar" class="gauge-bar"></div></div>
+            </div>
+        </div>
+
+        <!-- RIGHT TELEMETRY PANEL -->
+        <div class="panel panel-right">
+            <div class="panelTitle">◈ SYSTEM PERFORMANCE</div>
+            <div class="data-row"><span>FRAME RATE</span><span id="fpsVal" class="val">-- FPS</span></div>
+            <div class="data-row"><span>LATENCY</span><span id="latencyVal" class="val">-- ms</span></div>
+            <div class="data-row"><span>ENGINE</span><span class="val">BLAZEFACE-3D</span></div>
+            <div class="data-row"><span>SPECTRUM</span><span id="spectrumVal" class="val">TACTICAL</span></div>
+            <div class="data-row"><span>AUDIO SYNTH</span><span id="audioVal" class="val">ONLINE</span></div>
+        </div>
+
+        <div class="reticle"></div>
+        <div class="radar"><div class="radar-sweep"></div></div>
+
+        <!-- SPECTRUM MODES & CONTROLS -->
+        <div class="controls">
+            <button id="btnTactical" class="active" onclick="setSpectrum('tactical')">TACTICAL</button>
+            <button id="btnThermal" onclick="setSpectrum('thermal')">THERMAL</button>
+            <button id="btnNight" onclick="setSpectrum('night')">NVG GREEN</button>
+            <button id="btnAudio" onclick="toggleAudio()">AUDIO: ON</button>
+            <button onclick="takeSnapshot()">SNAPSHOT</button>
+        </div>
+    </div>
+
+    <!-- BOOT SCREEN -->
+    <div class="boot" id="boot">
+        <div class="title" style="font-size:36px">JARVIS Mk-VI</div>
+        <div class="subtitle" id="bootText" style="margin-top:10px">BOOTING TACTICAL MATRIX...</div>
+        <div class="progress-bar"><div id="bootFill" class="progress-fill"></div></div>
+    </div>
+</div>
+
+<script>
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js');
+    });
+}
+/* -------------------------------------------------------------------------- */
+/* 1. AUDIO SYNTHESIZER (Web Audio API)                                       */
+/* -------------------------------------------------------------------------- */
+class SoundEngine {
+    constructor() {
+        this.ctx = null;
+        this.enabled = true;
+    }
+
+    init() {
+        if (!this.ctx) {
+            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+    }
+
+    playTone(freq, type, duration, vol = 0.08) {
+        if (!this.enabled || !this.ctx) return;
+        try {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+            gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start();
+            osc.stop(this.ctx.currentTime + duration);
+        } catch(e){}
+    }
+
+    pingLock() {
+        this.playTone(880, 'sine', 0.08, 0.1);
+        setTimeout(() => this.playTone(1760, 'triangle', 0.12, 0.12), 60);
+    }
+
+    chimeMode() {
+        this.playTone(523.25, 'sine', 0.1, 0.1);
+        setTimeout(() => this.playTone(659.25, 'sine', 0.1, 0.1), 80);
+        setTimeout(() => this.playTone(783.99, 'sine', 0.15, 0.1), 160);
+    }
+}
+
+const SFX = new SoundEngine();
+
+/* -------------------------------------------------------------------------- */
+/* 2. CORE DOM & STATE SETUP                                                 */
+/* -------------------------------------------------------------------------- */
+const video = document.getElementById('webcam');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+let model = null;
+let currentSpectrum = 'tactical';
+let lastFrameTime = performance.now();
+let frameCount = 0;
+let fps = 0;
+let lastLockState = false;
+
+// Telemetry Elements
+const fpsVal = document.getElementById('fpsVal');
+const latencyVal = document.getElementById('latencyVal');
+const targetCount = document.getElementById('targetCount');
+const distanceVal = document.getElementById('distanceVal');
+const pulseVal = document.getElementById('pulseVal');
+
+const pitchVal = document.getElementById('pitchVal');
+const yawVal = document.getElementById('yawVal');
+const rollVal = document.getElementById('rollVal');
+
+const pitchBar = document.getElementById('pitchBar');
+const yawBar = document.getElementById('yawBar');
+const rollBar = document.getElementById('rollBar');
+
+const statusEl = document.getElementById('status');
+const spectrumVal = document.getElementById('spectrumVal');
+
+/* -------------------------------------------------------------------------- */
+/* 3. CLOCK & SPECTRUM CONTROL                                               */
+/* -------------------------------------------------------------------------- */
+setInterval(() => {
+    document.getElementById('clock').textContent = new Date().toLocaleTimeString([], {hour12:false});
+}, 1000);
+
+function setSpectrum(mode) {
+    currentSpectrum = mode;
+    document.body.className = '';
+    if (mode !== 'tactical') document.body.classList.add(`mode-${mode}`);
+    
+    document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
+    if(mode === 'tactical') document.getElementById('btnTactical').classList.add('active');
+    if(mode === 'thermal') document.getElementById('btnThermal').classList.add('active');
+    if(mode === 'night') document.getElementById('btnNight').classList.add('active');
+
+    spectrumVal.textContent = mode.toUpperCase();
+    SFX.chimeMode();
+}
+
+function toggleAudio() {
+    SFX.init();
+    SFX.enabled = !SFX.enabled;
+    document.getElementById('btnAudio').textContent = `AUDIO: ${SFX.enabled ? 'ON' : 'OFF'}`;
+    document.getElementById('audioVal').textContent = SFX.enabled ? 'ONLINE' : 'MUTED';
+}
+
+/* -------------------------------------------------------------------------- */
+/* 4. SPEECH RECOGNITION (Voice Commands)                                    */
+/* -------------------------------------------------------------------------- */
+function initSpeech() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        document.getElementById('speechStatus').textContent = 'VOICE COMMANDS: UNSUPPORTED';
+        return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = (e) => {
+        const transcript = e.results[e.results.length - 1][0].transcript.toLowerCase();
+        if (transcript.includes('thermal')) setSpectrum('thermal');
+        else if (transcript.includes('night') || transcript.includes('green')) setSpectrum('night');
+        else if (transcript.includes('tactical') || transcript.includes('normal')) setSpectrum('tactical');
+        else if (transcript.includes('capture') || transcript.includes('snapshot')) takeSnapshot();
+        else if (transcript.includes('mute')) toggleAudio();
+    };
+
+    recognition.onerror = () => {};
+    recognition.onend = () => recognition.start(); // Auto restart
+    try { recognition.start(); } catch(e){}
+}
+
+/* -------------------------------------------------------------------------- */
+/* 5. MATHEMATICAL HUD TELEMETRY ENGINE                                      */
+/* -------------------------------------------------------------------------- */
+function helperToArray(d) {
+    if (!d) return [];
+    if (Array.isArray(d)) return d;
+    return Array.from(d.dataSync ? d.dataSync() : d);
+}
+
+function computeSpatialMetrics(landmarks, bbox) {
+    // Landmarks: 0: Right Eye, 1: Left Eye, 2: Nose, 3: Mouth, 4: Right Ear, 5: Left Ear
+    const rEye = helperToArray(landmarks[0]);
+    const lEye = helperToArray(landmarks[1]);
+    const nose = helperToArray(landmarks[2]);
+
+    if (rEye.length < 2 || lEye.length < 2 || nose.length < 2) return { yaw:0, pitch:0, roll:0, dist:0 };
+
+    // Roll angle: Roll = arctan2(dy, dx)
+    const dx = lEye[0] - rEye[0];
+    const dy = lEye[1] - rEye[1];
+    const roll = Math.atan2(dy, dx) * (180 / Math.PI);
+
+    // Yaw estimation based on nose position between eyes
+    const eyeCenter = (rEye[0] + lEye[0]) / 2;
+    const eyeDist = Math.abs(lEye[0] - rEye[0]);
+    const yaw = ((nose[0] - eyeCenter) / (eyeDist || 1)) * 90;
+
+    // Pitch estimation based on vertical nose-eye offset
+    const eyeYCenter = (rEye[1] + lEye[1]) / 2;
+    const pitch = ((nose[1] - eyeYCenter) / (bbox[3] || 1) - 0.3) * 120;
+
+    // Distance estimation: D = FocalLength / Width
+    const estimatedDistance = Math.round(18000 / (bbox[2] || 1));
+
+    return {
+        yaw: Math.min(Math.max(Math.round(yaw), -90), 90),
+        pitch: Math.min(Math.max(Math.round(pitch), -90), 90),
+        roll: Math.min(Math.max(Math.round(roll), -90), 90),
+        dist: estimatedDistance
+    };
+}
+
+/* -------------------------------------------------------------------------- */
+/* 6. DETECTION & CANVAS RENDER LOOP                                          */
+/* -------------------------------------------------------------------------- */
+async function processFrame() {
+    const startTime = performance.now();
+
+    if (model && video.readyState >= 2) {
+        const predictions = await model.estimateFaces(video, false);
+        
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        targetCount.textContent = predictions.length;
+
+        if (predictions.length > 0) {
+            if (!lastLockState) SFX.pingLock();
+            lastLockState = true;
+
+            statusEl.textContent = "TARGET LOCKED";
+            statusEl.style.color = "var(--hud-color)";
+
+            const pred = predictions[0];
+            const startPt = helperToArray(pred.topLeft);
+            const endPt = helperToArray(pred.bottomRight);
+            const w = endPt[0] - startPt[0];
+            const h = endPt[1] - startPt[1];
+            const bbox = [startPt[0], startPt[1], w, h];
+            const landmarks = pred.landmarks;
+
+            // Compute Spatial Telemetry
+            const spatial = computeSpatialMetrics(landmarks, bbox);
+            
+            // Update Telemetry UI
+            distanceVal.textContent = `${spatial.dist} cm`;
+            pulseVal.textContent = `${72 + Math.floor(Math.sin(Date.now() / 1000) * 5)} BPM`;
+
+            pitchVal.textContent = `${spatial.pitch}°`;
+            yawVal.textContent = `${spatial.yaw}°`;
+            rollVal.textContent = `${spatial.roll}°`;
+
+            pitchBar.style.width = `${50 + (spatial.pitch / 90) * 50}%`;
+            yawBar.style.width = `${50 + (spatial.yaw / 90) * 50}%`;
+            rollBar.style.width = `${50 + (spatial.roll / 90) * 50}%`;
+
+            // Draw Dynamic Bounding Reticle
+            drawTacticalTarget(bbox, landmarks, spatial);
+        } else {
+            lastLockState = false;
+            statusEl.textContent = "SEARCHING...";
+            statusEl.style.color = "var(--alert-color)";
+            distanceVal.textContent = "-- cm";
+            pulseVal.textContent = "-- BPM";
+        }
+    }
+
+    // FPS Calculations
+    frameCount++;
+    const now = performance.now();
+    if (now - lastFrameTime >= 1000) {
+        fps = frameCount;
+        frameCount = 0;
+        lastFrameTime = now;
+        fpsVal.textContent = `${fps} FPS`;
+    }
+
+    latencyVal.textContent = `${Math.round(performance.now() - startTime)} ms`;
+    requestAnimationFrame(processFrame);
+}
+
+function drawTacticalTarget(bbox, landmarks, spatial) {
+    const [x, y, w, h] = bbox;
+    // Mirrored screen conversion
+    const drawX = canvas.width - x - w;
+
+    const themeColor = getComputedStyle(document.body).getPropertyValue('--hud-color').trim() || '#00eaff';
+
+    ctx.strokeStyle = themeColor;
+    ctx.fillStyle = themeColor;
+    ctx.lineWidth = 2;
+
+    // Corner brackets
+    const cornerSize = Math.min(25, w / 4);
+    ctx.beginPath();
+    // Top Left
+    ctx.moveTo(drawX, y + cornerSize); ctx.lineTo(drawX, y); ctx.lineTo(drawX + cornerSize, y);
+    // Top Right
+    ctx.moveTo(drawX + w - cornerSize, y); ctx.lineTo(drawX + w, y); ctx.lineTo(drawX + w, y + cornerSize);
+    // Bottom Right
+    ctx.moveTo(drawX + w, y + h - cornerSize); ctx.lineTo(drawX + w, y + h); ctx.lineTo(drawX + w - cornerSize, y + h);
+    // Bottom Left
+    ctx.moveTo(drawX + cornerSize, y + h); ctx.lineTo(drawX, y + h); ctx.lineTo(drawX, y + h - cornerSize);
+    ctx.stroke();
+
+    // 3D Wireframe Connections (Sub-Landmarks)
+    if (landmarks) {
+        ctx.lineWidth = 1;
+        landmarks.forEach((pt, idx) => {
+            const point = helperToArray(pt);
+            if (point.length >= 2) {
+                const lx = canvas.width - point[0];
+                const ly = point[1];
+
+                ctx.beginPath();
+                ctx.arc(lx, ly, 3, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Connect facial keypoints visually
+                if (idx === 2) { // Nose crosshair
+                    ctx.beginPath();
+                    ctx.arc(lx, ly, 12, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            }
+        });
+    }
+
+    // Target Dynamic Labels
+    ctx.font = "bold 11px 'Courier New'";
+    ctx.fillText(`SUBJECT #101 // ${spatial.dist}CM`, drawX, y - 12);
+    ctx.font = "9px 'Courier New'";
+    ctx.fillText(`YAW:${spatial.yaw}° PITCH:${spatial.pitch}° ROLL:${spatial.roll}°`, drawX, y + h + 15);
+}
+
+/* -------------------------------------------------------------------------- */
+/* 7. INITIALIZATION & CAMERA SETUP                                           */
+/* -------------------------------------------------------------------------- */
+async function bootSequence() {
+    const bootFill = document.getElementById('bootFill');
+    const bootText = document.getElementById('bootText');
+
+    const steps = [
+        { p: 20, t: "INITIALIZING AUDIO SYNTHESIZER..." },
+        { p: 40, t: "STARTING SPEECH RECOGNITION..." },
+        { p: 70, t: "LOADING BLAZEFACE 3D MODEL..." },
+        { p: 90, t: "CALIBRATING TACTICAL MATRIX..." },
+        { p: 100, t: "SYSTEM ONLINE" }
+    ];
+
+    for (let step of steps) {
+        bootFill.style.width = `${step.p}%`;
+        bootText.textContent = step.t;
+        await new Promise(r => setTimeout(r, 250));
+    }
+
+    const bootScreen = document.getElementById('boot');
+    bootScreen.style.opacity = '0';
+    setTimeout(() => bootScreen.style.display = 'none', 600);
+}
+
+async function init() {
+    SFX.init();
+    await bootSequence();
+    initSpeech();
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+            audio: false
+        });
+
+        video.srcObject = stream;
+        await new Promise(r => video.onloadedmetadata = r);
+        video.play();
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        model = await blazeface.load();
+        processFrame();
+
+    } catch (e) {
+        alert("Camera Access Denied or Model Load Failure.");
+    }
+}
+
+function takeSnapshot() {
+    const snapCanvas = document.createElement('canvas');
+    snapCanvas.width = canvas.width;
+    snapCanvas.height = canvas.height;
+    const c = snapCanvas.getContext('2d');
+
+    // Flip camera video horizontally for final saved image
+    c.save();
+    c.translate(snapCanvas.width, 0);
+    c.scale(-1, 1);
+    c.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
+    c.restore();
+
+    // Draw HUD graphics on top
+    c.drawImage(canvas, 0, 0);
+
+    const link = document.createElement('a');
+    link.download = `jarvis-scan-${Date.now()}.png`;
+    link.href = snapCanvas.toDataURL('image/png');
+    link.click();
+}
+
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
