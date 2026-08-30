@@ -354,6 +354,7 @@ button:hover, button.active{
             <button id="btnThermal" onclick="setSpectrum('thermal')">THERMAL</button>
             <button id="btnNight" onclick="setSpectrum('night')">NVG GREEN</button>
             <button id="btnAudio" onclick="toggleAudio()">AUDIO: ON</button>
+            <button onclick="toggleCamera()" class="hud-btn">SWITCH CAMERA</button>
             <button onclick="takeSnapshot()">SNAPSHOT</button>
         </div>
     </div>
@@ -672,6 +673,9 @@ function drawTacticalTarget(bbox, landmarks, spatial) {
 /* -------------------------------------------------------------------------- */
 /* 7. INITIALIZATION & CAMERA SETUP                                           */
 /* -------------------------------------------------------------------------- */
+let currentFacingMode = 'user'; // 'user' = Front Camera, 'environment' = Rear Camera
+let currentStream = null;
+
 async function bootSequence() {
     const bootFill = document.getElementById('bootFill');
     const bootText = document.getElementById('bootText');
@@ -695,27 +699,49 @@ async function bootSequence() {
     setTimeout(() => bootScreen.style.display = 'none', 600);
 }
 
+async function setupCamera() {
+    // Release existing camera sensor hardware before opening new stream
+    if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+    }
+
+    currentStream = await navigator.mediaDevices.getUserMedia({
+        video: { 
+            width: { ideal: 1280 }, 
+            height: { ideal: 720 }, 
+            facingMode: currentFacingMode 
+        },
+        audio: false
+    });
+
+    video.srcObject = currentStream;
+    await new Promise(r => video.onloadedmetadata = r);
+    video.play();
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+}
+
+async function toggleCamera() {
+    currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
+    try {
+        await setupCamera();
+    } catch (e) {
+        alert("Unable to switch camera or sensor unavailable.");
+        // Revert mode state if switch fails
+        currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
+    }
+}
+
 async function init() {
     SFX.init();
     await bootSequence();
     initSpeech();
 
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
-            audio: false
-        });
-
-        video.srcObject = stream;
-        await new Promise(r => video.onloadedmetadata = r);
-        video.play();
-
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-
+        await setupCamera();
         model = await blazeface.load();
         processFrame();
-
     } catch (e) {
         alert("Camera Access Denied or Model Load Failure.");
     }
@@ -727,14 +753,16 @@ function takeSnapshot() {
     snapCanvas.height = canvas.height;
     const c = snapCanvas.getContext('2d');
 
-    // Flip camera video horizontally for final saved image
     c.save();
-    c.translate(snapCanvas.width, 0);
-    c.scale(-1, 1);
+    // Only flip horizontally when using the selfie/front camera
+    if (currentFacingMode === 'user') {
+        c.translate(snapCanvas.width, 0);
+        c.scale(-1, 1);
+    }
     c.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
     c.restore();
 
-    // Draw HUD graphics on top
+    // Overlay active HUD canvas graphics
     c.drawImage(canvas, 0, 0);
 
     const link = document.createElement('a');
@@ -742,7 +770,6 @@ function takeSnapshot() {
     link.href = snapCanvas.toDataURL('image/png');
     link.click();
 }
-
 window.addEventListener('DOMContentLoaded', init);
 </script>
 </body>
