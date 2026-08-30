@@ -6,8 +6,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>JARVIS Mk-VI Tactical Vision Engine</title>
 
+<!-- TensorFlow.js & COCO-SSD Object Detection Model -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
 
 <style>
 *{
@@ -64,12 +65,16 @@ body{
     box-shadow: 0 0 20px var(--hud-glow), inset 0 0 60px rgba(0,0,0,0.8);
 }
 
-/* VIDEO SPECTRUM FILTERS */
-video{
+/* VIDEO & CANVAS LAYER MATCHING */
+video, canvas {
     position:absolute;
+    inset:0;
     width:100%;
     height:100%;
-    object-fit:cover;
+    object-fit:fill;
+}
+
+video {
     transform:scaleX(-1);
     transition: filter 0.3s ease;
     filter: contrast(1.1) brightness(0.8) saturate(0.8);
@@ -84,11 +89,8 @@ body.mode-night video {
 }
 
 canvas{
-    position:absolute;
-    inset:0;
-    width:100%;
-    height:100%;
     z-index:2;
+    pointer-events:none;
 }
 
 .overlay{
@@ -212,39 +214,13 @@ button:hover, button.active{
     box-shadow:0 0 12px var(--hud-color);
 }
 
-/* RADAR */
-.radar{
-    position:absolute;
-    right:25px;
-    bottom:60px;
-    width:130px;
-    height:130px;
-    border:1px solid var(--hud-color);
-    border-radius:50%;
-    background: radial-gradient(circle, transparent 60%, var(--hud-glow) 100%);
-    overflow:hidden;
-}
-
-.radar-sweep{
-    position:absolute;
-    width:50%;
-    height:50%;
-    left:50%;
-    top:50%;
-    transform-origin:0 0;
-    background:linear-gradient(45deg, transparent 50%, var(--hud-glow));
-    animation:radarSpin 2s linear infinite;
-}
-
-@keyframes radarSpin{ from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-
-/* RETICLE */
+/* CENTER HUD RETICLE */
 .reticle{
     position:absolute;
     left:50%;
     top:50%;
-    width:100px;
-    height:100px;
+    width:50px;
+    height:50px;
     transform:translate(-50%,-50%);
     border:1px dashed var(--hud-glow);
     border-radius:50%;
@@ -254,7 +230,7 @@ button:hover, button.active{
 .reticle::after {
     content:'';
     position:absolute;
-    inset:40%;
+    inset:35%;
     border:1px solid var(--hud-color);
 }
 
@@ -289,7 +265,7 @@ button:hover, button.active{
 
 <body>
 
-<div class="hud">
+<div class="hud" id="hudContainer">
     <video id="webcam" autoplay muted playsinline></video>
     <canvas id="canvas"></canvas>
 
@@ -299,38 +275,38 @@ button:hover, button.active{
         <div class="header">
             <div>
                 <div class="title">J.A.R.V.I.S // Mk-VI</div>
-                <div class="subtitle">TACTICAL NEURAL ENGINE // SPECTRUM ANALYZER</div>
+                <div class="subtitle">TACTICAL OBJECT RECOGNITION MATRIX</div>
             </div>
             <div style="text-align:center">
                 <div id="status" style="color:var(--alert-color); font-weight:bold;">INITIALIZING</div>
-                <div id="speechStatus" class="subtitle">VOICE COMMANDS: LISTENING</div>
             </div>
             <div style="text-align:right">
-                <div>SYS.VER // 6.4.0</div>
+                <div>SYS.VER // 6.5.0</div>
                 <div id="clock" class="subtitle">00:00:00</div>
             </div>
         </div>
 
         <!-- LEFT TELEMETRY PANEL -->
         <div class="panel panel-left">
-            <div class="panelTitle">◈ BIOMETRICS & SPATIAL</div>
+            <div class="panelTitle">◈ TARGET ANALYSIS</div>
             
             <div class="data-row"><span>TARGET LOCKS</span><span id="targetCount" class="val">0</span></div>
+            <div class="data-row"><span>PRIMARY CLASS</span><span id="primaryClass" class="val">NONE</span></div>
+            <div class="data-row"><span>CONFIDENCE</span><span id="confidenceVal" class="val">-- %</span></div>
             <div class="data-row"><span>EST. DISTANCE</span><span id="distanceVal" class="val">-- cm</span></div>
-            <div class="data-row"><span>PULSE (EST)</span><span id="pulseVal" class="val">-- BPM</span></div>
             
             <div class="gauge-box">
-                <div class="data-row"><span>HEAD PITCH</span><span id="pitchVal" class="val">0°</span></div>
+                <div class="data-row"><span>X-CENTER</span><span id="pitchVal" class="val">0°</span></div>
                 <div class="gauge"><div id="pitchBar" class="gauge-bar"></div></div>
             </div>
 
             <div class="gauge-box">
-                <div class="data-row"><span>HEAD YAW</span><span id="yawVal" class="val">0°</span></div>
+                <div class="data-row"><span>Y-CENTER</span><span id="yawVal" class="val">0°</span></div>
                 <div class="gauge"><div id="yawBar" class="gauge-bar"></div></div>
             </div>
 
             <div class="gauge-box">
-                <div class="data-row"><span>HEAD ROLL</span><span id="rollVal" class="val">0°</span></div>
+                <div class="data-row"><span>TARGET AREA</span><span id="rollVal" class="val">0%</span></div>
                 <div class="gauge"><div id="rollBar" class="gauge-bar"></div></div>
             </div>
         </div>
@@ -340,13 +316,12 @@ button:hover, button.active{
             <div class="panelTitle">◈ SYSTEM PERFORMANCE</div>
             <div class="data-row"><span>FRAME RATE</span><span id="fpsVal" class="val">-- FPS</span></div>
             <div class="data-row"><span>LATENCY</span><span id="latencyVal" class="val">-- ms</span></div>
-            <div class="data-row"><span>ENGINE</span><span class="val">BLAZEFACE-3D</span></div>
+            <div class="data-row"><span>ENGINE</span><span class="val">COCO-SSD</span></div>
             <div class="data-row"><span>SPECTRUM</span><span id="spectrumVal" class="val">TACTICAL</span></div>
             <div class="data-row"><span>AUDIO SYNTH</span><span id="audioVal" class="val">ONLINE</span></div>
         </div>
 
         <div class="reticle"></div>
-        <div class="radar"><div class="radar-sweep"></div></div>
 
         <!-- SPECTRUM MODES & CONTROLS -->
         <div class="controls">
@@ -373,8 +348,9 @@ if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('./sw.js');
     });
 }
+
 /* -------------------------------------------------------------------------- */
-/* 1. AUDIO SYNTHESIZER (Web Audio API)                                       */
+/* 1. AUDIO SYNTHESIZER                                                      */
 /* -------------------------------------------------------------------------- */
 class SoundEngine {
     constructor() {
@@ -419,7 +395,7 @@ class SoundEngine {
 const SFX = new SoundEngine();
 
 /* -------------------------------------------------------------------------- */
-/* 2. CORE DOM & STATE SETUP                                                 */
+/* 2. CORE SETUP & STATE                                                      */
 /* -------------------------------------------------------------------------- */
 const video = document.getElementById('webcam');
 const canvas = document.getElementById('canvas');
@@ -436,8 +412,9 @@ let lastLockState = false;
 const fpsVal = document.getElementById('fpsVal');
 const latencyVal = document.getElementById('latencyVal');
 const targetCount = document.getElementById('targetCount');
+const primaryClass = document.getElementById('primaryClass');
+const confidenceVal = document.getElementById('confidenceVal');
 const distanceVal = document.getElementById('distanceVal');
-const pulseVal = document.getElementById('pulseVal');
 
 const pitchVal = document.getElementById('pitchVal');
 const yawVal = document.getElementById('yawVal');
@@ -451,7 +428,7 @@ const statusEl = document.getElementById('status');
 const spectrumVal = document.getElementById('spectrumVal');
 
 /* -------------------------------------------------------------------------- */
-/* 3. CLOCK & SPECTRUM CONTROL                                               */
+/* 3. CLOCK & SPECTRUM CONTROL                                                */
 /* -------------------------------------------------------------------------- */
 setInterval(() => {
     document.getElementById('clock').textContent = new Date().toLocaleTimeString([], {hour12:false});
@@ -479,86 +456,21 @@ function toggleAudio() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* 4. SPEECH RECOGNITION (Voice Commands)                                    */
-/* -------------------------------------------------------------------------- */
-function initSpeech() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-        document.getElementById('speechStatus').textContent = 'VOICE COMMANDS: UNSUPPORTED';
-        return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.lang = 'en-US';
-
-    recognition.onresult = (e) => {
-        const transcript = e.results[e.results.length - 1][0].transcript.toLowerCase();
-        if (transcript.includes('thermal')) setSpectrum('thermal');
-        else if (transcript.includes('night') || transcript.includes('green')) setSpectrum('night');
-        else if (transcript.includes('tactical') || transcript.includes('normal')) setSpectrum('tactical');
-        else if (transcript.includes('capture') || transcript.includes('snapshot')) takeSnapshot();
-        else if (transcript.includes('mute')) toggleAudio();
-    };
-
-    recognition.onerror = () => {};
-    recognition.onend = () => recognition.start(); // Auto restart
-    try { recognition.start(); } catch(e){}
-}
-
-/* -------------------------------------------------------------------------- */
-/* 5. MATHEMATICAL HUD TELEMETRY ENGINE                                      */
-/* -------------------------------------------------------------------------- */
-function helperToArray(d) {
-    if (!d) return [];
-    if (Array.isArray(d)) return d;
-    return Array.from(d.dataSync ? d.dataSync() : d);
-}
-
-function computeSpatialMetrics(landmarks, bbox) {
-    // Landmarks: 0: Right Eye, 1: Left Eye, 2: Nose, 3: Mouth, 4: Right Ear, 5: Left Ear
-    const rEye = helperToArray(landmarks[0]);
-    const lEye = helperToArray(landmarks[1]);
-    const nose = helperToArray(landmarks[2]);
-
-    if (rEye.length < 2 || lEye.length < 2 || nose.length < 2) return { yaw:0, pitch:0, roll:0, dist:0 };
-
-    // Roll angle: Roll = arctan2(dy, dx)
-    const dx = lEye[0] - rEye[0];
-    const dy = lEye[1] - rEye[1];
-    const roll = Math.atan2(dy, dx) * (180 / Math.PI);
-
-    // Yaw estimation based on nose position between eyes
-    const eyeCenter = (rEye[0] + lEye[0]) / 2;
-    const eyeDist = Math.abs(lEye[0] - rEye[0]);
-    const yaw = ((nose[0] - eyeCenter) / (eyeDist || 1)) * 90;
-
-    // Pitch estimation based on vertical nose-eye offset
-    const eyeYCenter = (rEye[1] + lEye[1]) / 2;
-    const pitch = ((nose[1] - eyeYCenter) / (bbox[3] || 1) - 0.3) * 120;
-
-    // Distance estimation: D = FocalLength / Width
-    const estimatedDistance = Math.round(18000 / (bbox[2] || 1));
-
-    return {
-        yaw: Math.min(Math.max(Math.round(yaw), -90), 90),
-        pitch: Math.min(Math.max(Math.round(pitch), -90), 90),
-        roll: Math.min(Math.max(Math.round(roll), -90), 90),
-        dist: estimatedDistance
-    };
-}
-
-/* -------------------------------------------------------------------------- */
-/* 6. DETECTION & CANVAS RENDER LOOP                                          */
+/* 4. DETECTION LOOP                                                          */
 /* -------------------------------------------------------------------------- */
 async function processFrame() {
     const startTime = performance.now();
 
     if (model && video.readyState >= 2) {
-        const predictions = await model.estimateFaces(video, false);
+        // Lock canvas internal dimensions to native video dimensions
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+        }
+
+        const predictions = await model.detect(video);
         
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-
         targetCount.textContent = predictions.length;
 
         if (predictions.length > 0) {
@@ -568,37 +480,35 @@ async function processFrame() {
             statusEl.textContent = "TARGET LOCKED";
             statusEl.style.color = "var(--hud-color)";
 
-            const pred = predictions[0];
-            const startPt = helperToArray(pred.topLeft);
-            const endPt = helperToArray(pred.bottomRight);
-            const w = endPt[0] - startPt[0];
-            const h = endPt[1] - startPt[1];
-            const bbox = [startPt[0], startPt[1], w, h];
-            const landmarks = pred.landmarks;
+            const primary = predictions[0];
+            const [x, y, w, h] = primary.bbox;
+            const dist = Math.round(18000 / (w || 1));
+            const xCenterPct = Math.round(((x + w / 2) / canvas.width) * 100);
+            const yCenterPct = Math.round(((y + h / 2) / canvas.height) * 100);
+            const areaPct = Math.min(100, Math.round(((w * h) / (canvas.width * canvas.height)) * 100));
 
-            // Compute Spatial Telemetry
-            const spatial = computeSpatialMetrics(landmarks, bbox);
-            
-            // Update Telemetry UI
-            distanceVal.textContent = `${spatial.dist} cm`;
-            pulseVal.textContent = `${72 + Math.floor(Math.sin(Date.now() / 1000) * 5)} BPM`;
+            primaryClass.textContent = primary.class.toUpperCase();
+            confidenceVal.textContent = `${Math.round(primary.score * 100)}%`;
+            distanceVal.textContent = `${dist} cm`;
 
-            pitchVal.textContent = `${spatial.pitch}°`;
-            yawVal.textContent = `${spatial.yaw}°`;
-            rollVal.textContent = `${spatial.roll}°`;
+            pitchVal.textContent = `${xCenterPct}%`;
+            yawVal.textContent = `${yCenterPct}%`;
+            rollVal.textContent = `${areaPct}%`;
 
-            pitchBar.style.width = `${50 + (spatial.pitch / 90) * 50}%`;
-            yawBar.style.width = `${50 + (spatial.yaw / 90) * 50}%`;
-            rollBar.style.width = `${50 + (spatial.roll / 90) * 50}%`;
+            pitchBar.style.width = `${xCenterPct}%`;
+            yawBar.style.width = `${yCenterPct}%`;
+            rollBar.style.width = `${areaPct}%`;
 
-            // Draw Dynamic Bounding Reticle
-            drawTacticalTarget(bbox, landmarks, spatial);
+            predictions.forEach((pred, index) => {
+                drawTacticalTarget(pred, index);
+            });
         } else {
             lastLockState = false;
             statusEl.textContent = "SEARCHING...";
             statusEl.style.color = "var(--alert-color)";
+            primaryClass.textContent = "NONE";
+            confidenceVal.textContent = "-- %";
             distanceVal.textContent = "-- cm";
-            pulseVal.textContent = "-- BPM";
         }
     }
 
@@ -616,19 +526,26 @@ async function processFrame() {
     requestAnimationFrame(processFrame);
 }
 
-function drawTacticalTarget(bbox, landmarks, spatial) {
-    const [x, y, w, h] = bbox;
-    // Mirrored screen conversion
-    const drawX = canvas.width - x - w;
+function drawTacticalTarget(prediction, index) {
+    const [x, y, w, h] = prediction.bbox;
+    const isSelfie = (currentFacingMode === 'user');
+    const drawX = isSelfie ? (canvas.width - x - w) : x;
 
     const themeColor = getComputedStyle(document.body).getPropertyValue('--hud-color').trim() || '#00eaff';
 
     ctx.strokeStyle = themeColor;
     ctx.fillStyle = themeColor;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.5;
 
-    // Corner brackets
-    const cornerSize = Math.min(25, w / 4);
+    // 1. Subtle dashed outline of the full bounding box
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.globalAlpha = 0.35;
+    ctx.strokeRect(drawX, y, w, h);
+    ctx.restore();
+
+    // 2. Corner brackets
+    const cornerSize = Math.min(24, w / 5);
     ctx.beginPath();
     // Top Left
     ctx.moveTo(drawX, y + cornerSize); ctx.lineTo(drawX, y); ctx.lineTo(drawX + cornerSize, y);
@@ -640,40 +557,28 @@ function drawTacticalTarget(bbox, landmarks, spatial) {
     ctx.moveTo(drawX + cornerSize, y + h); ctx.lineTo(drawX, y + h); ctx.lineTo(drawX, y + h - cornerSize);
     ctx.stroke();
 
-    // 3D Wireframe Connections (Sub-Landmarks)
-    if (landmarks) {
-        ctx.lineWidth = 1;
-        landmarks.forEach((pt, idx) => {
-            const point = helperToArray(pt);
-            if (point.length >= 2) {
-                const lx = canvas.width - point[0];
-                const ly = point[1];
+    // 3. Central targeting crosshair on detected object center
+    const cx = drawX + w / 2;
+    const cy = y + h / 2;
+    const crossSize = 10;
+    ctx.beginPath();
+    ctx.moveTo(cx - crossSize, cy); ctx.lineTo(cx + crossSize, cy);
+    ctx.moveTo(cx, cy - crossSize); ctx.lineTo(cx, cy + crossSize);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+    ctx.fill();
 
-                ctx.beginPath();
-                ctx.arc(lx, ly, 3, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Connect facial keypoints visually
-                if (idx === 2) { // Nose crosshair
-                    ctx.beginPath();
-                    ctx.arc(lx, ly, 12, 0, Math.PI * 2);
-                    ctx.stroke();
-                }
-            }
-        });
-    }
-
-    // Target Dynamic Labels
+    // 4. Label tag
+    const label = `#${index + 1} ${prediction.class.toUpperCase()} [${Math.round(prediction.score * 100)}%]`;
     ctx.font = "bold 11px 'Courier New'";
-    ctx.fillText(`SUBJECT #101 // ${spatial.dist}CM`, drawX, y - 12);
-    ctx.font = "9px 'Courier New'";
-    ctx.fillText(`YAW:${spatial.yaw}° PITCH:${spatial.pitch}° ROLL:${spatial.roll}°`, drawX, y + h + 15);
+    ctx.fillText(label, drawX + 4, y > 18 ? y - 6 : y + 15);
 }
 
 /* -------------------------------------------------------------------------- */
-/* 7. INITIALIZATION & CAMERA SETUP                                           */
+/* 5. INITIALIZATION & CAMERA SETUP                                           */
 /* -------------------------------------------------------------------------- */
-let currentFacingMode = 'user'; // 'user' = Front Camera, 'environment' = Rear Camera
+let currentFacingMode = 'user';
 let currentStream = null;
 
 async function bootSequence() {
@@ -681,17 +586,16 @@ async function bootSequence() {
     const bootText = document.getElementById('bootText');
 
     const steps = [
-        { p: 20, t: "INITIALIZING AUDIO SYNTHESIZER..." },
-        { p: 40, t: "STARTING SPEECH RECOGNITION..." },
-        { p: 70, t: "LOADING BLAZEFACE 3D MODEL..." },
-        { p: 90, t: "CALIBRATING TACTICAL MATRIX..." },
+        { p: 25, t: "INITIALIZING AUDIO SYNTHESIZER..." },
+        { p: 55, t: "LOADING COCO-SSD OBJECT MODEL..." },
+        { p: 85, t: "CALIBRATING TACTICAL MATRIX..." },
         { p: 100, t: "SYSTEM ONLINE" }
     ];
 
     for (let step of steps) {
         bootFill.style.width = `${step.p}%`;
         bootText.textContent = step.t;
-        await new Promise(r => setTimeout(r, 250));
+        await new Promise(r => setTimeout(r, 200));
     }
 
     const bootScreen = document.getElementById('boot');
@@ -700,7 +604,6 @@ async function bootSequence() {
 }
 
 async function setupCamera() {
-    // Release existing camera sensor hardware before opening new stream
     if (currentStream) {
         currentStream.getTracks().forEach(track => track.stop());
     }
@@ -718,6 +621,8 @@ async function setupCamera() {
     await new Promise(r => video.onloadedmetadata = r);
     video.play();
 
+    video.style.transform = (currentFacingMode === 'user') ? 'scaleX(-1)' : 'scaleX(1)';
+
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 }
@@ -727,8 +632,7 @@ async function toggleCamera() {
     try {
         await setupCamera();
     } catch (e) {
-        alert("Unable to switch camera or sensor unavailable.");
-        // Revert mode state if switch fails
+        alert("Unable to switch camera.");
         currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
     }
 }
@@ -736,11 +640,10 @@ async function toggleCamera() {
 async function init() {
     SFX.init();
     await bootSequence();
-    initSpeech();
 
     try {
         await setupCamera();
-        model = await blazeface.load();
+        model = await cocoSsd.load();
         processFrame();
     } catch (e) {
         alert("Camera Access Denied or Model Load Failure.");
@@ -754,7 +657,6 @@ function takeSnapshot() {
     const c = snapCanvas.getContext('2d');
 
     c.save();
-    // Only flip horizontally when using the selfie/front camera
     if (currentFacingMode === 'user') {
         c.translate(snapCanvas.width, 0);
         c.scale(-1, 1);
@@ -762,7 +664,6 @@ function takeSnapshot() {
     c.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
     c.restore();
 
-    // Overlay active HUD canvas graphics
     c.drawImage(canvas, 0, 0);
 
     const link = document.createElement('a');
@@ -770,6 +671,7 @@ function takeSnapshot() {
     link.href = snapCanvas.toDataURL('image/png');
     link.click();
 }
+
 window.addEventListener('DOMContentLoaded', init);
 </script>
 </body>
